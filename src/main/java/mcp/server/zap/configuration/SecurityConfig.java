@@ -3,6 +3,7 @@ package mcp.server.zap.configuration;
 import lombok.extern.slf4j.Slf4j;
 import mcp.server.zap.service.JwtService;
 import mcp.server.zap.service.TokenBlacklistService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -76,20 +77,25 @@ public class SecurityConfig {
 
     private final JwtProperties jwtProperties;
     private final ApiKeyProperties apiKeyProperties;
-    private final JwtService jwtService;
     private final TokenBlacklistService tokenBlacklistService;
+    
+    // Optional - only available when JWT is enabled
+    private JwtService jwtService;
 
-    private static final String API_KEY_HEADER = "X-API-Key";
     private static final String AUTHORIZATION_HEADER = "Authorization";
+    private static final String BEARER_PREFIX = "Bearer ";
 
     public SecurityConfig(JwtProperties jwtProperties,
                          ApiKeyProperties apiKeyProperties,
-                         JwtService jwtService,
                          TokenBlacklistService tokenBlacklistService) {
         this.jwtProperties = jwtProperties;
         this.apiKeyProperties = apiKeyProperties;
-        this.jwtService = jwtService;
         this.tokenBlacklistService = tokenBlacklistService;
+    }
+    
+    @Autowired(required = false)
+    public void setJwtService(JwtService jwtService) {
+        this.jwtService = jwtService;
     }
 
     /**
@@ -172,32 +178,31 @@ public class SecurityConfig {
      */
     private Mono<Void> authenticateWithJwtFirst(ServerWebExchange exchange, org.springframework.web.server.WebFilterChain chain) {
         String authHeader = exchange.getRequest().getHeaders().getFirst(AUTHORIZATION_HEADER);
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            String token = authHeader.substring(7);
-            return authenticateWithJwt(token, exchange, chain);
-        }
-
-        // Fall back to API key authentication
-        String apiKey = exchange.getRequest().getHeaders().getFirst(API_KEY_HEADER);
-        if (apiKey != null && !apiKey.trim().isEmpty()) {
-            return authenticateWithApiKey(apiKey, exchange, chain);
+        if (authHeader != null && authHeader.startsWith(BEARER_PREFIX)) {
+            String token = authHeader.substring(BEARER_PREFIX.length());
+            // Try JWT first, if it fails, try as API key
+            return authenticateWithJwt(token, exchange, chain)
+                .onErrorResume(e -> authenticateWithApiKey(token, exchange, chain));
         }
 
         log.warn("Missing authentication in request to {} (JWT mode)", exchange.getRequest().getPath());
-        return unauthorizedResponse(exchange, "Missing authentication. Provide JWT token via Authorization: Bearer header or API key via X-API-Key header");
+        return unauthorizedResponse(exchange, "Missing authentication. Provide token via Authorization: Bearer header");
     }
     
     /**
-     * API_KEY mode: Only accept API key authentication.
+     * API_KEY mode: Accept API key via Authorization: Bearer header.
      */
     private Mono<Void> authenticateWithApiKeyOnly(ServerWebExchange exchange, org.springframework.web.server.WebFilterChain chain) {
-        String apiKey = exchange.getRequest().getHeaders().getFirst(API_KEY_HEADER);
-        if (apiKey != null && !apiKey.trim().isEmpty()) {
-            return authenticateWithApiKey(apiKey, exchange, chain);
+        String authHeader = exchange.getRequest().getHeaders().getFirst(AUTHORIZATION_HEADER);
+        if (authHeader != null && authHeader.startsWith(BEARER_PREFIX)) {
+            String apiKey = authHeader.substring(BEARER_PREFIX.length());
+            if (!apiKey.trim().isEmpty()) {
+                return authenticateWithApiKey(apiKey, exchange, chain);
+            }
         }
 
-        log.warn("Missing API key in request to {} (API_KEY mode)", exchange.getRequest().getPath());
-        return unauthorizedResponse(exchange, "Missing API key. Provide via X-API-Key header");
+        log.warn("Missing Bearer token in request to {} (API_KEY mode)", exchange.getRequest().getPath());
+        return unauthorizedResponse(exchange, "Missing API key. Provide via Authorization: Bearer <api-key> header");
     }
 
     /**
@@ -206,6 +211,11 @@ public class SecurityConfig {
     private Mono<Void> authenticateWithJwt(String token, ServerWebExchange exchange, org.springframework.web.server.WebFilterChain chain) {
         if (!jwtProperties.isEnabled()) {
             return unauthorizedResponse(exchange, "JWT authentication is disabled");
+        }
+        
+        if (jwtService == null) {
+            log.error("JWT authentication requested but JwtService is not available");
+            return unauthorizedResponse(exchange, "JWT authentication is not configured");
         }
 
         try {
@@ -286,10 +296,13 @@ public class SecurityConfig {
      */
     private Mono<Void> unauthorizedResponse(ServerWebExchange exchange, String message) {
         exchange.getResponse().setStatusCode(HttpStatus.UNAUTHORIZED);
-        exchange.getResponse().getHeaders().add("WWW-Authenticate", "API-Key");
+        exchange.getResponse().getHeaders().add("Content-Type", "application/json");
+        exchange.getResponse().getHeaders().add("WWW-Authenticate", "Bearer");
+        // Sanitize message to prevent injection
+        String safeMessage = message.replaceAll("[\"\\\n\r\t]", "");
         return exchange.getResponse().writeWith(
             Mono.just(exchange.getResponse().bufferFactory()
-                .wrap(("{\"error\": \"" + message + "\"}").getBytes()))
+                .wrap(("{\"error\": \"" + safeMessage + "\"}").getBytes()))
         );
     }
 }

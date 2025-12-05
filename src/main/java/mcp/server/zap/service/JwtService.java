@@ -2,6 +2,7 @@ package mcp.server.zap.service;
 
 import lombok.extern.slf4j.Slf4j;
 import mcp.server.zap.configuration.JwtProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
 import org.springframework.security.oauth2.jwt.*;
 import org.springframework.stereotype.Service;
@@ -18,6 +19,7 @@ import java.util.UUID;
  */
 @Slf4j
 @Service
+@ConditionalOnProperty(name = "mcp.server.auth.jwt.enabled", havingValue = "true")
 public class JwtService {
 
     private final JwtProperties jwtProperties;

@@ -75,6 +75,21 @@ public class OpenApiService {
             @ToolParam(description = "Path to the OpenAPI/Swagger spec file (JSON or YAML)") String filePath,
             @ToolParam(description = "Host override for the API spec") String hostOverride
     ) {
+        // Validate file path to prevent path traversal attacks
+        if (filePath == null || filePath.trim().isEmpty()) {
+            throw new IllegalArgumentException("File path cannot be null or empty");
+        }
+        
+        // Block path traversal attempts
+        if (filePath.contains("..") || filePath.contains("~")) {
+            throw new IllegalArgumentException("Invalid file path: path traversal not allowed");
+        }
+        
+        // Only allow files from /zap/wrk directory (mounted volume)
+        if (!filePath.startsWith("/zap/wrk/")) {
+            throw new IllegalArgumentException("File must be in /zap/wrk/ directory");
+        }
+        
         try {
             ApiResponse importResp = zap.openapi.importFile(filePath, hostOverride);
             List<String> importIds = new ArrayList<>();

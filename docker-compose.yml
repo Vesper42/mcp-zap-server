@@ -8,7 +8,7 @@ services:
       - -host
       - 0.0.0.0
       - -port
-      - "8090"
+      - "8091"
       - -config
       - api.key=${ZAP_API_KEY}
       - -config
@@ -18,12 +18,12 @@ services:
       - -addoninstall
       - ajaxSpider
     ports:
-      - "8090:8090"
+      - "8091:8091"
     environment:
       ZAP_API_KEY: ${ZAP_API_KEY}
       ZAP_MEMORY: ${ZAP_MEMORY:-4G}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8090/"]
+      test: ["CMD", "curl", "-f", "http://localhost:8091/"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -32,70 +32,31 @@ services:
       - ${LOCAL_ZAP_WORKPLACE_FOLDER}/zap-wrk:/zap/wrk
       - ${LOCAL_ZAP_WORKPLACE_FOLDER}/zap-home:/home/zap/.ZAP
 
-
-  open-webui:
-    image: ghcr.io/open-webui/open-webui:main
-    ports:
-      - "3000:8080"
-    healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    volumes:
-      - open-webui:/app/backend/data
-
-  mcpo:
-    image: ghcr.io/open-webui/mcpo:main
-    depends_on:
-      mcp-server:
-        condition: service_healthy
-    ports:
-      - "9090:9090"
-    command:
-      - --port
-      - "9090"
-      - --server-type
-      - "streamable-http"
-      - --
-      - "http://mcp-server:7456/mcp"
-
-  mcpo-filesystem:
-    image: ghcr.io/open-webui/mcpo:main
-    depends_on:
-      open-webui:
-        condition: service_healthy
-    ports:
-      - "8001:8001"        # Expose the HTTP OpenAPI endpoint
-    command:
-      - --port
-      - "8001"
-      - --                  # End of mcpo flags; what follows is the MCP server command
-      - "npx"
-      - "-y"
-      - "@modelcontextprotocol/server-filesystem"
-      - "${LOCAL_ZAP_WORKPLACE_FOLDER}"         # Allowed directory inside the container
-    volumes:
-      - ${LOCAL_ZAP_WORKPLACE_FOLDER}:${LOCAL_ZAP_WORKPLACE_FOLDER}
-
   mcp-server:
     build:
       context: .
-      dockerfile: ${DOCKERFILE:-Dockerfile}  # Use Dockerfile.native for native image
-    image: mcp-zap-server:${IMAGE_TAG:-latest}
+      dockerfile: Dockerfile
+    image: mcp-zap-server:latest
     restart: always
     depends_on:
       zap:
         condition: service_healthy
     ports:
       - "7456:7456"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7456/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     environment:
       ZAP_API_URL: zap
-      ZAP_API_PORT: 8090
-      ZAP_API_KEY: ${ZAP_API_KEY:-ZAP_API_KEY}
+      ZAP_API_PORT: 8091
+      ZAP_API_KEY: ${ZAP_API_KEY}
       MCP_API_KEY: ${MCP_API_KEY}
-      MCP_SECURITY_ENABLED: ${MCP_SECURITY_ENABLED:-false}
+      MCP_SECURITY_ENABLED: true
+      MCP_SECURITY_MODE: api-key
+      JWT_ENABLED: false
       ZAP_MAX_ACTIVE_SCAN_DURATION: ${ZAP_MAX_ACTIVE_SCAN_DURATION:-30}
       ZAP_MAX_SPIDER_SCAN_DURATION: ${ZAP_MAX_SPIDER_SCAN_DURATION:-15}
       ZAP_ALLOW_LOCALHOST: ${ZAP_ALLOW_LOCALHOST:-false}
@@ -103,18 +64,3 @@ services:
       ZAP_URL_WHITELIST: ${ZAP_URL_WHITELIST:-}
     volumes:
       - ${LOCAL_ZAP_WORKPLACE_FOLDER}:/zap/wrk
-
-  juice-shop:
-    image: bkimminich/juice-shop:v17.3.0
-    restart: always
-    ports:
-      - "3001:3000"
-
-  petstore:
-    image: swaggerapi/petstore3:1.0.26
-    restart: always
-    ports:
-      - "3002:8080"
-
-volumes:
-  open-webui:

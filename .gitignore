@@ -16,6 +16,9 @@
 .env.local
 .env.*.local
 
+# ZAP workspace data (local runtime data)
+zap-data/
+
 # macOS
 .DS_Store
 

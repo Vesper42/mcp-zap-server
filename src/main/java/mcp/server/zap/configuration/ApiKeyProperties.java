@@ -36,6 +36,11 @@ public class ApiKeyProperties {
          * Client display name.
          */
         private String name;
+        
+        /**
+         * Client description.
+         */
+        private String description;
 
         /**
          * Scopes/permissions granted to this client.

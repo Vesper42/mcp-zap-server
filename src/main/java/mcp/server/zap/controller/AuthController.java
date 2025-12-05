@@ -6,6 +6,7 @@ import mcp.server.zap.model.RefreshTokenRequest;
 import mcp.server.zap.model.TokenRequest;
 import mcp.server.zap.model.TokenResponse;
 import mcp.server.zap.service.JwtService;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,10 +17,12 @@ import java.util.Optional;
 
 /**
  * REST controller for authentication and token management.
+ * Only enabled when JWT authentication is enabled.
  */
 @Slf4j
 @RestController
 @RequestMapping("/auth")
+@ConditionalOnProperty(name = "mcp.server.auth.jwt.enabled", havingValue = "true")
 public class AuthController {
 
     private final JwtService jwtService;

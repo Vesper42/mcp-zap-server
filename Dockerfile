@@ -4,13 +4,15 @@ WORKDIR /usr/src/app
 COPY src ./src
 COPY build.gradle .
 COPY settings.gradle .
-RUN gradle build -x test
+RUN gradle build -x test && \
+    ls -la build/libs/ && \
+    find build/libs -name "mcp-zap-server-*.jar" ! -name "*-plain.jar" -exec cp {} build/libs/app.jar \;
 
 # Runtime stage
 FROM eclipse-temurin:25-jre-alpine
 RUN apk add --no-cache curl
 WORKDIR /app
-COPY --from=builder /usr/src/app/build/libs/mcp-zap-server-*.jar ./app.jar
+COPY --from=builder /usr/src/app/build/libs/app.jar ./app.jar
 EXPOSE 7456
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:7456/actuator/health || exit 1
