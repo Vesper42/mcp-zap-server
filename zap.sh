@@ -4,13 +4,15 @@
 # MCP ZAP Server Management Script
 # =============================================================================
 # Usage:
-#   ./zap.sh --install    Install and start ZAP MCP Server
-#   ./zap.sh --restart    Restart all services
-#   ./zap.sh --uninstall  Remove containers, images, and clean up
-#   ./zap.sh --status     Show status of services
-#   ./zap.sh --logs       Tail logs from services
-#   ./zap.sh --stop       Stop services without removing
-#   ./zap.sh --help       Show this help message
+#   ./zap.sh --install              Install and start (auto-detect container runtime)
+#   ./zap.sh --install --docker     Install using Docker
+#   ./zap.sh --install --podman     Install using Podman
+#   ./zap.sh --restart              Restart all services
+#   ./zap.sh --uninstall            Remove containers, images, and clean up
+#   ./zap.sh --status               Show status of services
+#   ./zap.sh --logs                 Tail logs from services
+#   ./zap.sh --stop                 Stop services without removing
+#   ./zap.sh --help                 Show this help message
 # =============================================================================
 
 set -e
@@ -28,6 +30,10 @@ cd "$SCRIPT_DIR"
 
 # Docker Compose project name
 PROJECT_NAME="mcp-zap-server"
+
+# Container runtime (docker or podman) - will be set by detect_runtime or user flag
+CONTAINER_RUNTIME=""
+COMPOSE_CMD=""
 
 # =============================================================================
 # Helper Functions
@@ -57,31 +63,114 @@ print_info() {
     echo -e "${BLUE}ℹ $1${NC}"
 }
 
-# Check if Docker is installed
-check_docker() {
-    if ! command -v docker &> /dev/null; then
-        print_error "Docker is not installed. Please install Docker first."
-        echo "  Visit: https://docs.docker.com/get-docker/"
-        exit 1
+# Detect available container runtime
+detect_runtime() {
+    if [ -n "$CONTAINER_RUNTIME" ]; then
+        return  # Already set by user flag
     fi
     
-    if ! docker info &> /dev/null; then
-        print_error "Docker daemon is not running. Please start Docker."
-        exit 1
+    # Check for Docker first
+    if command -v docker &> /dev/null && docker info &> /dev/null 2>&1; then
+        CONTAINER_RUNTIME="docker"
+        COMPOSE_CMD="docker compose"
+        return
     fi
     
-    print_success "Docker is installed and running"
+    # Check for Podman
+    if command -v podman &> /dev/null; then
+        CONTAINER_RUNTIME="podman"
+        # Check for podman-compose or podman compose
+        if command -v podman-compose &> /dev/null; then
+            COMPOSE_CMD="podman-compose"
+        elif podman compose version &> /dev/null 2>&1; then
+            COMPOSE_CMD="podman compose"
+        else
+            print_error "Podman found but podman-compose is not installed."
+            echo "  Install with: pip install podman-compose"
+            echo "  Or: brew install podman-compose"
+            exit 1
+        fi
+        return
+    fi
+    
+    print_error "No container runtime found. Please install Docker or Podman."
+    echo "  Docker: https://docs.docker.com/get-docker/"
+    echo "  Podman: https://podman.io/getting-started/installation"
+    exit 1
 }
 
-# Check if Docker Compose is available
-check_docker_compose() {
-    if ! docker compose version &> /dev/null; then
-        print_error "Docker Compose is not available. Please install Docker Compose."
-        echo "  Visit: https://docs.docker.com/compose/install/"
-        exit 1
-    fi
+# Set runtime from user flag
+set_runtime() {
+    local runtime="$1"
+    case "$runtime" in
+        docker)
+            if ! command -v docker &> /dev/null; then
+                print_error "Docker is not installed."
+                exit 1
+            fi
+            CONTAINER_RUNTIME="docker"
+            COMPOSE_CMD="docker compose"
+            ;;
+        podman)
+            if ! command -v podman &> /dev/null; then
+                print_error "Podman is not installed."
+                exit 1
+            fi
+            CONTAINER_RUNTIME="podman"
+            if command -v podman-compose &> /dev/null; then
+                COMPOSE_CMD="podman-compose"
+            elif podman compose version &> /dev/null 2>&1; then
+                COMPOSE_CMD="podman compose"
+            else
+                print_error "podman-compose is not installed."
+                echo "  Install with: pip install podman-compose"
+                exit 1
+            fi
+            ;;
+        *)
+            print_error "Unknown runtime: $runtime. Use 'docker' or 'podman'."
+            exit 1
+            ;;
+    esac
+}
+
+# Check if container runtime is ready
+check_runtime() {
+    detect_runtime
     
-    print_success "Docker Compose is available"
+    if [ "$CONTAINER_RUNTIME" = "docker" ]; then
+        if ! docker info &> /dev/null; then
+            print_error "Docker daemon is not running. Please start Docker."
+            exit 1
+        fi
+        print_success "Using Docker"
+    elif [ "$CONTAINER_RUNTIME" = "podman" ]; then
+        # Start podman machine if on macOS and not running
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            if ! podman machine inspect &> /dev/null 2>&1; then
+                print_info "Initializing Podman machine..."
+                podman machine init || true
+            fi
+            if ! podman info &> /dev/null 2>&1; then
+                print_info "Starting Podman machine..."
+                podman machine start || true
+            fi
+        fi
+        print_success "Using Podman"
+    fi
+}
+
+# Check if Docker is installed (legacy - now uses check_runtime)
+check_docker() {
+    check_runtime
+}
+
+# Check if Docker Compose is available (legacy - now uses check_runtime)
+check_docker_compose() {
+    if [ -z "$COMPOSE_CMD" ]; then
+        detect_runtime
+    fi
+    print_success "$COMPOSE_CMD is available"
 }
 
 # Check if .env file exists
@@ -129,13 +218,13 @@ check_env_file() {
 
 # Check if services are running
 is_running() {
-    local running=$(docker compose ps --status running -q 2>/dev/null | wc -l | tr -d ' ')
+    local running=$($COMPOSE_CMD ps --status running -q 2>/dev/null | wc -l | tr -d ' ')
     [ "$running" -gt 0 ]
 }
 
 # Get container status
 get_status() {
-    docker compose ps -a 2>/dev/null
+    $COMPOSE_CMD ps -a 2>/dev/null
 }
 
 # Wait for services to be healthy
@@ -146,12 +235,12 @@ wait_for_healthy() {
     print_info "Waiting for services to be healthy..."
     
     while [ $elapsed -lt $timeout ]; do
-        local healthy=$(docker compose ps --status running -q 2>/dev/null | wc -l | tr -d ' ')
+        local healthy=$($COMPOSE_CMD ps --status running -q 2>/dev/null | wc -l | tr -d ' ')
         local expected=2  # zap and mcp-server
         
         if [ "$healthy" -eq "$expected" ]; then
             # Check if mcp-server health check passes
-            if docker compose exec -T mcp-server curl -sf http://localhost:7456/actuator/health &>/dev/null; then
+            if $COMPOSE_CMD exec -T mcp-server curl -sf http://localhost:7456/actuator/health &>/dev/null; then
                 print_success "All services are healthy"
                 return 0
             fi
@@ -203,11 +292,11 @@ cmd_install() {
     fi
     
     # Build and start services
-    print_info "Building and starting services..."
+    print_info "Building and starting services with $CONTAINER_RUNTIME..."
     echo ""
     
-    docker compose build
-    docker compose up -d
+    $COMPOSE_CMD build
+    $COMPOSE_CMD up -d
     
     echo ""
     
@@ -244,7 +333,7 @@ cmd_restart() {
     fi
     
     print_info "Restarting services..."
-    docker compose restart
+    $COMPOSE_CMD restart
     
     echo ""
     wait_for_healthy
@@ -268,7 +357,7 @@ cmd_stop() {
     fi
     
     print_info "Stopping services..."
-    docker compose stop
+    $COMPOSE_CMD stop
     
     echo ""
     print_success "Services stopped"
@@ -304,15 +393,17 @@ cmd_uninstall() {
     
     # Stop and remove containers
     print_info "Stopping and removing containers..."
-    docker compose down --remove-orphans 2>/dev/null || true
+    $COMPOSE_CMD down --remove-orphans 2>/dev/null || true
     
     # Remove built images
     print_info "Removing built images..."
-    docker rmi mcp-zap-server:latest 2>/dev/null || true
-    
-    # Remove dangling images from build
-    print_info "Cleaning up dangling images..."
-    docker image prune -f 2>/dev/null || true
+    if [ "$CONTAINER_RUNTIME" = "docker" ]; then
+        docker rmi mcp-zap-server:latest 2>/dev/null || true
+        docker image prune -f 2>/dev/null || true
+    else
+        podman rmi mcp-zap-server:latest 2>/dev/null || true
+        podman image prune -f 2>/dev/null || true
+    fi
     
     echo ""
     print_success "Uninstall complete!"
@@ -367,12 +458,12 @@ cmd_logs() {
     
     print_info "Tailing logs (Ctrl+C to exit)..."
     echo ""
-    docker compose logs -f
+    $COMPOSE_CMD logs -f
 }
 
 cmd_help() {
     print_banner
-    echo "Usage: ./zap.sh [COMMAND]"
+    echo "Usage: ./zap.sh [COMMAND] [OPTIONS]"
     echo ""
     echo "Commands:"
     echo "  --install     Install and start ZAP MCP Server"
@@ -383,12 +474,18 @@ cmd_help() {
     echo "  --logs        Tail logs from services"
     echo "  --help        Show this help message"
     echo ""
+    echo "Options:"
+    echo "  --docker      Use Docker as container runtime"
+    echo "  --podman      Use Podman as container runtime"
+    echo ""
     echo "Examples:"
-    echo "  ./zap.sh --install      # First time setup"
-    echo "  ./zap.sh --status       # Check if running"
-    echo "  ./zap.sh --logs         # View logs"
-    echo "  ./zap.sh --restart      # Restart services"
-    echo "  ./zap.sh --uninstall    # Clean up everything"
+    echo "  ./zap.sh --install              # Auto-detect runtime"
+    echo "  ./zap.sh --install --docker     # Use Docker explicitly"
+    echo "  ./zap.sh --install --podman     # Use Podman explicitly"
+    echo "  ./zap.sh --status               # Check if running"
+    echo "  ./zap.sh --logs                 # View logs"
+    echo "  ./zap.sh --restart              # Restart services"
+    echo "  ./zap.sh --uninstall            # Clean up everything"
     echo ""
 }
 
@@ -396,7 +493,32 @@ cmd_help() {
 # Main
 # =============================================================================
 
-case "${1:-}" in
+# Parse arguments
+COMMAND=""
+for arg in "$@"; do
+    case "$arg" in
+        --docker)
+            set_runtime "docker"
+            ;;
+        --podman)
+            set_runtime "podman"
+            ;;
+        --install|-i|--restart|-r|--stop|-s|--uninstall|-u|--status|--logs|-l|--help|-h)
+            COMMAND="$arg"
+            ;;
+        *)
+            if [ -z "$COMMAND" ]; then
+                print_error "Unknown command: $arg"
+                echo ""
+                cmd_help
+                exit 1
+            fi
+            ;;
+    esac
+done
+
+# Execute command
+case "${COMMAND:-}" in
     --install|-i)
         cmd_install
         ;;
@@ -417,11 +539,5 @@ case "${1:-}" in
         ;;
     --help|-h|"")
         cmd_help
-        ;;
-    *)
-        print_error "Unknown command: $1"
-        echo ""
-        cmd_help
-        exit 1
         ;;
 esac
