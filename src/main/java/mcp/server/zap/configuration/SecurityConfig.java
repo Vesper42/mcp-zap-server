@@ -100,29 +100,35 @@ public class SecurityConfig {
 
     /**
      * Configure security filter chain based on the selected security mode.
+     * 
+     * CSRF Protection Disabled - Security Justification:
+     * This is an API-only server for machine-to-machine communication (MCP protocol).
+     * CSRF attacks require browser-based sessions with cookies, which this server does not use.
+     * Authentication is handled via Bearer tokens in the Authorization header.
+     * See OWASP: https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html
      */
     @Bean
+    @SuppressWarnings("java:S4502") // CSRF disabled intentionally - API-only server with token auth, no cookies
     public SecurityWebFilterChain securityWebFilterChain(ServerHttpSecurity http) {
         SecurityMode mode = getSecurityMode();
         
         // If authentication is disabled or mode is NONE, permit all requests
-        // CSRF protection disabled for /mcp endpoint (used by mcpo for MCP protocol)
         if (!securityEnabled || mode == SecurityMode.NONE) {
             log.warn("⚠️ SECURITY DISABLED - All requests will be permitted without authentication");
             log.warn("   This should ONLY be used in development/testing environments");
-            log.warn("   CSRF protection: DISABLED for /mcp endpoint (MCP protocol)");
+            // lgtm[java/spring-disabled-csrf-protection] - API-only server, no browser sessions
             return http
-                .csrf(csrf -> csrf.disable())
+                .csrf(csrf -> csrf.disable()) // NOSONAR - Intentional: API-only, token-based auth
                 .authorizeExchange(exchanges -> exchanges.anyExchange().permitAll())
                 .build();
         }
 
         // Apply authentication for API_KEY or JWT mode
-        // CSRF protection: Disabled for API-only server with token-based authentication
         log.info("Security mode: {} - Authentication required for all endpoints (except public paths)", mode);
         log.info("CSRF protection: DISABLED (API-only server with token-based auth, no cookies)");
+        // lgtm[java/spring-disabled-csrf-protection] - API-only server, no browser sessions
         http
-            .csrf(csrf -> csrf.disable())  // Disable CSRF for API-only server (MCP protocol doesn't support CSRF)
+            .csrf(csrf -> csrf.disable()) // NOSONAR - Intentional: API-only, token-based auth
             .authorizeExchange(exchanges -> exchanges
                 .pathMatchers("/actuator/health", "/actuator/info", "/auth/token", "/auth/refresh").permitAll()
                 .anyExchange().authenticated()
