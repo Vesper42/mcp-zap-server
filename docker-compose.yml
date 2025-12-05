@@ -29,8 +29,9 @@ services:
       retries: 3
       start_period: 30s
     volumes:
-      - ${LOCAL_ZAP_WORKPLACE_FOLDER}/zap-wrk:/zap/wrk
-      - ${LOCAL_ZAP_WORKPLACE_FOLDER}/zap-home:/home/zap/.ZAP
+      # Use :z flag for SELinux shared label (works on RHEL/Fedora/CentOS)
+      - ${LOCAL_ZAP_WORKPLACE_FOLDER}/zap-wrk:/zap/wrk:z
+      - ${LOCAL_ZAP_WORKPLACE_FOLDER}/zap-home:/home/zap/.ZAP:z
 
   mcp-server:
     build:

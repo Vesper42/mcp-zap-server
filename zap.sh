@@ -291,6 +291,19 @@ cmd_install() {
         mkdir -p "$LOCAL_ZAP_WORKPLACE_FOLDER/zap-home"
     fi
     
+    # Set permissions for ZAP container (runs as zap user with UID 1000)
+    print_info "Setting directory permissions..."
+    chmod -R 777 "$LOCAL_ZAP_WORKPLACE_FOLDER/zap-wrk" 2>/dev/null || true
+    chmod -R 777 "$LOCAL_ZAP_WORKPLACE_FOLDER/zap-home" 2>/dev/null || true
+    
+    # Apply SELinux context if on RHEL/Fedora/CentOS
+    if command -v getenforce &> /dev/null && [ "$(getenforce 2>/dev/null)" != "Disabled" ]; then
+        print_info "Applying SELinux context for container volumes..."
+        chcon -Rt svirt_sandbox_file_t "$LOCAL_ZAP_WORKPLACE_FOLDER" 2>/dev/null || \
+        chcon -Rt container_file_t "$LOCAL_ZAP_WORKPLACE_FOLDER" 2>/dev/null || \
+        print_warning "Could not set SELinux context. You may need to run: sudo chcon -Rt container_file_t $LOCAL_ZAP_WORKPLACE_FOLDER"
+    fi
+    
     # Build and start services
     print_info "Building and starting services with $CONTAINER_RUNTIME..."
     echo ""
