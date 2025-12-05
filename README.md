@@ -1,8 +1,8 @@
 # MCP ZAP Server
 
-A Spring Boot application exposing OWASP ZAP as an MCP (Model Context Protocol) server. It lets any MCP‑compatible AI agent (e.g., Claude Desktop, Cursor) orchestrate ZAP actions—spider, active scan, import OpenAPI specs, and generate reports.
+MCP server for OWASP ZAP security scanning - enables AI agents to perform automated web security testing via the Model Context Protocol.
 
-> **NOTE**: This project is forked from [dtkmn/mcp-zap-server](https://github.com/dtkmn/mcp-zap-server) and simplified for easier setup.
+> **Original Project**: This is a simplified fork of [dtkmn/mcp-zap-server](https://github.com/dtkmn/mcp-zap-server)
 
 ## Features
 
