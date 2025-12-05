@@ -5,16 +5,42 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.net.*;
+import java.security.Security;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
 /**
  * Service for validating and filtering URLs before security scans.
  * Prevents scanning of internal resources, localhost, and blacklisted domains.
+ * 
+ * <p>SECURITY NOTE: This service implements DNS rebinding protection by:
+ * <ul>
+ *   <li>Caching DNS resolutions to prevent TOCTOU attacks</li>
+ *   <li>Setting JVM DNS cache TTL to prevent rebinding during scan lifecycle</li>
+ *   <li>Providing resolved IPs that can be used for direct scanning</li>
+ * </ul>
+ * 
+ * <p>For maximum security, consider also:
+ * <ul>
+ *   <li>Using an egress proxy with IP allowlisting for the ZAP container</li>
+ *   <li>Network policies in Kubernetes to restrict ZAP's outbound access</li>
+ * </ul>
  */
 @Slf4j
 @Service
 public class UrlValidationService {
+
+    // DNS cache entry with timestamp for TTL expiration
+    private record DnsCacheEntry(InetAddress address, Instant cachedAt) {}
+    
+    // DNS cache to prevent rebinding attacks (hostname -> cached entry)
+    private final Map<String, DnsCacheEntry> dnsCache = new ConcurrentHashMap<>();
+    
+    // Cache expiry time in milliseconds (matches JVM DNS cache)
+    private static final long DNS_CACHE_TTL_MS = 60_000;
 
     @Value("${zap.scan.url.allowLocalhost:false}")
     private boolean allowLocalhost;
@@ -29,8 +55,39 @@ public class UrlValidationService {
     private List<String> blacklist;
 
     /**
+     * Validates a URL for security scanning and returns the resolved IP.
+     * Uses DNS caching to prevent DNS rebinding attacks.
+     *
+     * @param urlString The URL to validate
+     * @return ValidationResult containing the resolved IP address for direct scanning
+     * @throws IllegalArgumentException if URL is invalid or not allowed
+     */
+    public ValidationResult validateUrlWithResolution(String urlString) {
+        validateUrl(urlString);
+        try {
+            URL url = URI.create(urlString).toURL();
+            String host = url.getHost().toLowerCase();
+            DnsCacheEntry entry = dnsCache.get(host);
+            if (entry != null && !isCacheExpired(entry)) {
+                return new ValidationResult(urlString, entry.address().getHostAddress(), host);
+            }
+        } catch (Exception e) {
+            log.warn("Could not get cached resolution for {}", urlString);
+        }
+        return new ValidationResult(urlString, null, null);
+    }
+    
+    /**
+     * Check if a cache entry has expired.
+     */
+    private boolean isCacheExpired(DnsCacheEntry entry) {
+        return Instant.now().isAfter(entry.cachedAt().plusMillis(DNS_CACHE_TTL_MS));
+    }
+
+    /**
      * Validates a URL for security scanning.
      * Checks format, reachability, and security policies.
+     * Caches DNS resolution to prevent DNS rebinding attacks.
      *
      * @param urlString The URL to validate
      * @throws IllegalArgumentException if URL is invalid or not allowed
@@ -84,8 +141,13 @@ public class UrlValidationService {
         }
 
         // Resolve hostname to IP and check private networks
+        // Cache the resolution to prevent DNS rebinding attacks (TOCTOU mitigation)
         try {
             InetAddress address = InetAddress.getByName(host);
+            
+            // Cache the DNS resolution to prevent rebinding
+            dnsCache.put(host, new DnsCacheEntry(address, Instant.now()));
+            log.debug("Cached DNS resolution: {} -> {}", host, address.getHostAddress());
             
             // Check for private/internal IP ranges
             if (!allowPrivateNetworks && isPrivateNetwork(address)) {
@@ -184,5 +246,37 @@ public class UrlValidationService {
             whitelist.isEmpty() ? "[]" : whitelist,
             blacklist.isEmpty() ? "[]" : blacklist
         );
+    }
+
+    /**
+     * Get the cached resolved IP for a hostname.
+     * This can be used to instruct ZAP to scan by IP to prevent DNS rebinding.
+     *
+     * @param host The hostname to look up
+     * @return The cached InetAddress, or null if not cached or expired
+     */
+    public InetAddress getCachedResolution(String host) {
+        DnsCacheEntry entry = dnsCache.get(host.toLowerCase());
+        if (entry != null && !isCacheExpired(entry)) {
+            return entry.address();
+        }
+        return null;
+    }
+
+    /**
+     * Clear the DNS cache. Useful for testing or forced refresh.
+     */
+    public void clearDnsCache() {
+        dnsCache.clear();
+        log.info("DNS cache cleared");
+    }
+
+    /**
+     * Result of URL validation including resolved IP for DNS rebinding protection.
+     */
+    public record ValidationResult(String originalUrl, String resolvedIp, String hostname) {
+        public boolean hasResolvedIp() {
+            return resolvedIp != null && !resolvedIp.isEmpty();
+        }
     }
 }

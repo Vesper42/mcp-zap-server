@@ -43,8 +43,9 @@ public class OpenApiServiceTest {
 
     @Test
     void importOpenApiSpecFileHandlesException() throws Exception {
-        when(openapi.importFile("/tmp/api.yaml", "host")).thenThrow(new ClientApiException("oops"));
-        assertThrowsExactly(ZapApiException.class, () -> service.importOpenApiSpecFile("/tmp/api.yaml",
+        // Use path under /zap/wrk/ to pass path validation
+        when(openapi.importFile("/zap/wrk/api.yaml", "host")).thenThrow(new ClientApiException("oops"));
+        assertThrowsExactly(ZapApiException.class, () -> service.importOpenApiSpecFile("/zap/wrk/api.yaml",
             "host"));
     }
 }

@@ -121,15 +121,19 @@ mcp:
     targetMemoryUtilizationPercentage: 80
   
   # Security Configuration
+  # IMPORTANT: Always set mode to "api-key" in production!
   security:
-    mode: "none"  # Options: none, api-key, jwt
-    enabled: false
-    apiKey: "changeme-mcp-api-key"  # Only used if mode=api-key
+    mode: "api-key"  # Options: none, api-key (jwt is deprecated)
+    enabled: true
+    apiKey: ""  # REQUIRED in production! Set via --set mcp.security.apiKey=<your-key>
     
-    # JWT Configuration (only used if mode=jwt)
+    # JWT Configuration (DEPRECATED - use api-key mode instead)
+    # JWT is disabled by default and should not be used
     jwt:
       enabled: false
-      secret: ""  # Generate with: openssl rand -base64 32
+      # secret must be set via environment variable if jwt is enabled
+      # NEVER use default values - generate with: openssl rand -base64 64
+      secret: ""
       issuer: "mcp-zap-server"
       accessTokenExpiry: 3600
       refreshTokenExpiry: 604800

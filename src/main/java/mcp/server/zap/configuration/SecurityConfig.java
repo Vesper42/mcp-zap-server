@@ -256,15 +256,16 @@ public class SecurityConfig {
 
     /**
      * Authenticate using API key.
+     * Uses constant-time comparison to prevent timing attacks.
      */
     private Mono<Void> authenticateWithApiKey(String apiKey, ServerWebExchange exchange, org.springframework.web.server.WebFilterChain chain) {
-        // Check configured API keys
+        // Check configured API keys using constant-time comparison
         boolean validKey = apiKeyProperties.getApiKeys().stream()
-                .anyMatch(client -> client.getKey().equals(apiKey));
+                .anyMatch(client -> constantTimeEquals(client.getKey(), apiKey));
 
         // Also check legacy API key for backward compatibility
         if (!validKey && legacyMcpApiKey != null && !legacyMcpApiKey.trim().isEmpty()) {
-            validKey = legacyMcpApiKey.equals(apiKey);
+            validKey = constantTimeEquals(legacyMcpApiKey, apiKey);
         }
 
         if (!validKey) {
@@ -289,6 +290,18 @@ public class SecurityConfig {
         
         return chain.filter(exchange)
             .contextWrite(ReactiveSecurityContextHolder.withAuthentication(authentication));
+    }
+
+    /**
+     * Constant-time string comparison to prevent timing attacks.
+     */
+    private boolean constantTimeEquals(String a, String b) {
+        if (a == null || b == null) {
+            return a == b;
+        }
+        byte[] aBytes = a.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] bBytes = b.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        return java.security.MessageDigest.isEqual(aBytes, bBytes);
     }
 
     /**

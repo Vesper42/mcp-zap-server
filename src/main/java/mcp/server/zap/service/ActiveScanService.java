@@ -97,6 +97,7 @@ public class ActiveScanService {
     public String getActiveScanStatus(
             @ToolParam(description = "The scan ID returned when you started the Active Scan") String scanId
     ) {
+        validateScanId(scanId);
         try {
             ApiResponse resp = zap.ascan.status(scanId);
 
@@ -106,7 +107,7 @@ public class ActiveScanService {
             String pct = ((ApiResponseElement) resp).getValue();
             return "Active Scan [" + scanId + "] is " + pct + "% complete";
         } catch (ClientApiException e) {
-            log.error("Error starting active scan on {}: {}", scanId, e.getMessage(), e);
+            log.error("Error getting active scan status for ID {}: {}", scanId, e.getMessage(), e);
             throw new ZapApiException("Error retrieving status for active scan " + scanId, e);
         }
     }
@@ -124,12 +125,26 @@ public class ActiveScanService {
     public String stopActiveScan(
             @ToolParam(description = "The scanId returned by zap_active_scan") String scanId
     ) {
+        validateScanId(scanId);
         try {
             zap.ascan.stop(scanId);
             return "🛑 Stopped active scan with ID: " + scanId;
         } catch (ClientApiException e) {
             log.error("Error stopping active scan {}: {}", scanId, e.getMessage(), e);
             throw new ZapApiException("Error stopping active scan " + scanId, e);
+        }
+    }
+    
+    /**
+     * Validate scan ID to prevent injection attacks.
+     */
+    private void validateScanId(String scanId) {
+        if (scanId == null || scanId.trim().isEmpty()) {
+            throw new IllegalArgumentException("Scan ID cannot be null or empty");
+        }
+        // ZAP scan IDs are numeric
+        if (!scanId.matches("^\\d+$")) {
+            throw new IllegalArgumentException("Invalid scan ID format");
         }
     }
 

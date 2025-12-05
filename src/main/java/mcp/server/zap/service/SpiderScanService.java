@@ -87,7 +87,7 @@ public class SpiderScanService {
             if (errorMsg.contains("unexpected end of file") || errorMsg.contains("socketexception")) {
                 throw new ZapApiException("Target website is blocking ZAP requests or closed the connection. " +
                     "Common causes: WAF protection, bot detection, IP blocking. " +
-                    "Try testing with juice-shop (http://juice-shop:3000) or petstore (http://petstore:8080) instead. " +
+                    "Try using the AJAX Spider (zap_ajax_spider) which uses a real browser, or test with a simpler target. " +
                     "Original error: " + e.getMessage(), e);
             }
             
@@ -103,12 +103,26 @@ public class SpiderScanService {
      */
     @Tool(name = "zap_spider_status", description = "Get status of a spider scan by ID")
     public String getSpiderStatus(@ToolParam(description = "scanId") String scanId) {
+        validateScanId(scanId);
         try {
             ApiResponse resp = zap.spider.status(scanId);
             return ((org.zaproxy.clientapi.core.ApiResponseElement) resp).getValue();
         } catch (ClientApiException e) {
             log.error("Error retrieving spider status for ID {}: {}", scanId, e.getMessage(), e);
             throw new ZapApiException("Error retrieving spider status for ID " + scanId, e);
+        }
+    }
+    
+    /**
+     * Validate scan ID to prevent injection attacks.
+     */
+    private void validateScanId(String scanId) {
+        if (scanId == null || scanId.trim().isEmpty()) {
+            throw new IllegalArgumentException("Scan ID cannot be null or empty");
+        }
+        // ZAP scan IDs are numeric
+        if (!scanId.matches("^\\d+$")) {
+            throw new IllegalArgumentException("Invalid scan ID format");
         }
     }
 

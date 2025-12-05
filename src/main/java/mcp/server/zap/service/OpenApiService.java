@@ -7,12 +7,16 @@ import org.springframework.ai.tool.annotation.ToolParam;
 import org.springframework.stereotype.Service;
 import org.zaproxy.clientapi.core.*;
 
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 
 @Slf4j
 @Service
 public class OpenApiService {
+
+    private static final Path ALLOWED_BASE_PATH = Paths.get("/zap/wrk").toAbsolutePath().normalize();
 
     private final ClientApi zap;
     private final UrlValidationService urlValidationService;
@@ -39,9 +43,12 @@ public class OpenApiService {
     ) {
         // Validate URL before importing
         urlValidationService.validateUrl(apiUrl);
+        
+        // Validate hostOverride if provided (SSRF protection)
+        String sanitizedHostOverride = validateHostOverride(hostOverride);
 
         try {
-            ApiResponse importResp = zap.openapi.importUrl(apiUrl, hostOverride);
+            ApiResponse importResp = zap.openapi.importUrl(apiUrl, sanitizedHostOverride);
             List<String> importIds = new ArrayList<>();
             if (importResp instanceof ApiResponseList list) {
                 for (ApiResponse item : list.getItems()) {
@@ -54,9 +61,28 @@ public class OpenApiService {
                     ? "Import completed synchronously and is ready to scan."
                     : "Import completed asynchronously (jobs: " + String.join(",", importIds) + ") and is ready to scan.";
         } catch (ClientApiException e) {
-            log.error("Failed to retrieve URLs for base URL: {}: {}", apiUrl, e.getMessage(), e);
-            throw new ZapApiException("Failed to retrieve URLs", e);
+            log.error("Failed to import OpenAPI spec from URL: {}", e.getMessage(), e);
+            throw new ZapApiException("Failed to import OpenAPI spec", e);
         }
+    }
+
+    /**
+     * Validate and sanitize hostOverride to prevent SSRF attacks.
+     */
+    private String validateHostOverride(String hostOverride) {
+        if (hostOverride == null || hostOverride.trim().isEmpty()) {
+            return "";
+        }
+        
+        // Construct a URL to validate the host override
+        String testUrl = "http://" + hostOverride.trim();
+        try {
+            urlValidationService.validateUrl(testUrl);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("Invalid host override: " + e.getMessage());
+        }
+        
+        return hostOverride.trim();
     }
 
 
@@ -76,22 +102,13 @@ public class OpenApiService {
             @ToolParam(description = "Host override for the API spec") String hostOverride
     ) {
         // Validate file path to prevent path traversal attacks
-        if (filePath == null || filePath.trim().isEmpty()) {
-            throw new IllegalArgumentException("File path cannot be null or empty");
-        }
+        String validatedPath = validateFilePath(filePath);
         
-        // Block path traversal attempts
-        if (filePath.contains("..") || filePath.contains("~")) {
-            throw new IllegalArgumentException("Invalid file path: path traversal not allowed");
-        }
-        
-        // Only allow files from /zap/wrk directory (mounted volume)
-        if (!filePath.startsWith("/zap/wrk/")) {
-            throw new IllegalArgumentException("File must be in /zap/wrk/ directory");
-        }
+        // Validate hostOverride if provided (SSRF protection)
+        String sanitizedHostOverride = validateHostOverride(hostOverride);
         
         try {
-            ApiResponse importResp = zap.openapi.importFile(filePath, hostOverride);
+            ApiResponse importResp = zap.openapi.importFile(validatedPath, sanitizedHostOverride);
             List<String> importIds = new ArrayList<>();
             if (importResp instanceof ApiResponseList list) {
                 for (ApiResponse item : list.getItems()) {
@@ -106,6 +123,34 @@ public class OpenApiService {
         } catch (ClientApiException e) {
             log.error("Error importing OpenAPI spec file: {}", e.getMessage(), e);
             throw new ZapApiException("Error importing OpenAPI/Swagger spec file", e);
+        }
+    }
+
+    /**
+     * Validate file path to prevent path traversal attacks.
+     * Uses path normalization instead of string contains check.
+     */
+    private String validateFilePath(String filePath) {
+        if (filePath == null || filePath.trim().isEmpty()) {
+            throw new IllegalArgumentException("File path cannot be null or empty");
+        }
+        
+        try {
+            // Normalize the path to resolve any .. or . components
+            Path normalizedPath = Paths.get(filePath).toAbsolutePath().normalize();
+            
+            // Ensure the normalized path is still within the allowed directory
+            if (!normalizedPath.startsWith(ALLOWED_BASE_PATH)) {
+                log.warn("Path traversal attempt detected: {} normalized to {}", filePath, normalizedPath);
+                throw new IllegalArgumentException("File must be in /zap/wrk/ directory");
+            }
+            
+            return normalizedPath.toString();
+        } catch (IllegalArgumentException e) {
+            throw e; // Re-throw our own exceptions
+        } catch (Exception e) {
+            log.warn("Invalid file path: {}", filePath, e);
+            throw new IllegalArgumentException("Invalid file path");
         }
     }
 

@@ -10,9 +10,18 @@ RUN gradle build -x test && \
 
 # Runtime stage
 FROM eclipse-temurin:25-jre-alpine
-RUN apk add --no-cache curl
+
+# Security: Run as non-root user
+RUN apk add --no-cache curl && \
+    addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
+
 WORKDIR /app
-COPY --from=builder /usr/src/app/build/libs/app.jar ./app.jar
+COPY --from=builder --chown=appuser:appgroup /usr/src/app/build/libs/app.jar ./app.jar
+
+# Switch to non-root user
+USER appuser
+
 EXPOSE 7456
 HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD curl -f http://localhost:7456/actuator/health || exit 1

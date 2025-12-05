@@ -41,7 +41,8 @@ public class ReportServiceTest {
     void getHtmlReportReturnsPath() throws Exception {
         when(reports.generate(any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any(), any()))
                 .thenReturn(new ApiResponseElement("file", "/tmp/report.html"));
-        String result = service.getHtmlReport("modern", "light", "site");
+        // Use valid URL format for sites parameter
+        String result = service.getHtmlReport("modern", "light", "http://example.com");
         assertTrue(result.endsWith("report.html"));
     }
 }

@@ -68,6 +68,35 @@ public class ReportService {
             @ToolParam(description = "The report theme (dark/light") String theme,
             @ToolParam(description = "The sites to include in the report (commas separated)") String sites
     ) {
+        // Input validation
+        if (reportTemplate == null || reportTemplate.trim().isEmpty()) {
+            throw new IllegalArgumentException("Report template cannot be null or empty");
+        }
+        if (theme == null || theme.trim().isEmpty()) {
+            throw new IllegalArgumentException("Theme cannot be null or empty");
+        }
+        if (sites == null || sites.trim().isEmpty()) {
+            throw new IllegalArgumentException("Sites cannot be null or empty");
+        }
+        
+        // Validate theme is one of allowed values
+        if (!theme.equals("dark") && !theme.equals("light")) {
+            throw new IllegalArgumentException("Theme must be 'dark' or 'light'");
+        }
+        
+        // Validate template doesn't contain path traversal
+        if (reportTemplate.contains("..") || reportTemplate.contains("/") || reportTemplate.contains("\\")) {
+            throw new IllegalArgumentException("Invalid report template name");
+        }
+        
+        // Validate sites format (should be URLs)
+        for (String site : sites.split(",")) {
+            String trimmed = site.trim();
+            if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+                throw new IllegalArgumentException("Invalid site URL: " + trimmed);
+            }
+        }
+        
         try {
             ApiResponse raw = zap.reports.generate(
                     "My ZAP Scan Report",          // title

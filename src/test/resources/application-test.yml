@@ -8,16 +8,17 @@ spring:
 # Disable security for tests
 mcp:
   server:
-    apiKey: test-api-key
+    apiKey: integration-test-secure-key-12345678
     security:
       enabled: false
     
-    # Test JWT configuration
+    # Test configuration
     auth:
+      skipValidation: true  # Skip API key validation in tests
       apiKeys:
-        - clientId: test-client
-          key: test-api-key
-          description: Test client
+        - clientId: integration-test-client
+          key: integration-test-secure-key-12345678
+          description: Integration test client
       
       jwt:
         enabled: true

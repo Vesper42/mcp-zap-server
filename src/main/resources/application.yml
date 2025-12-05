@@ -13,6 +13,12 @@ spring:
           mcp-endpoint: /mcp
           keep-alive-interval: 30s
         type: ASYNC
+  # Request size limits to prevent DoS
+  codec:
+    max-in-memory-size: 1MB
+  webflux:
+    multipart:
+      max-file-size: 10MB
 
 logging:
   level:
@@ -77,4 +83,4 @@ management:
         include: health,info
   endpoint:
     health:
-      show-details: always
+      show-details: when_authorized
